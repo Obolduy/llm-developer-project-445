@@ -5,8 +5,8 @@ output_type подключается нестрогой схемой: строг
 
 Каждый запуск агента пишется в llm_calls: модель, токены, задержка.
 
-TODO(failover): если llm_pool.enabled() — запуск через
-  llm_pool.run_with_failover, в llm_calls — фактический провайдер.
+С пулом провайдеров (бонус failover) в llm_calls пишется фактический
+провайдер и его модель: agent = "<провайдер>:<агент>".
 """
 from __future__ import annotations
 
@@ -43,13 +43,18 @@ def _loads(value):
 
 async def run_logged(agent: Agent, run_input, *, trace_id: str = ""):
     """Runner.run + строка в llm_calls (токены из usage, задержка вокруг запуска)."""
+    from app import llm_pool
+
+    box = llm_pool.tracking()
     started = time.perf_counter()
     result = await Runner.run(agent, run_input)
+    provider = box.get("provider")
+    name = f"{provider.name}:{agent.name}" if provider else agent.name
     usage = result.context_wrapper.usage
     db.execute(
         "insert into llm_calls(trace_id, agent, model, input_tokens, output_tokens, latency_ms)"
         " values (%s, %s, %s, %s, %s, %s)",
-        (trace_id or None, agent.name, config.MODEL_NAME, usage.input_tokens or 0,
+        (trace_id or None, name, provider.model if provider else config.MODEL_NAME, usage.input_tokens or 0,
          usage.output_tokens or 0, int((time.perf_counter() - started) * 1000)),
     )
     return result

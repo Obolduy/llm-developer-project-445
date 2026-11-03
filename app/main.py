@@ -25,7 +25,12 @@ from core import config
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config.setup_model()
+    from app import llm_pool
+
+    if config.LLM_SECONDARY_BASE_URL:
+        llm_pool.setup_pool()  # бонус: два провайдера с переключением
+    else:
+        config.setup_model()
     yield
 
 

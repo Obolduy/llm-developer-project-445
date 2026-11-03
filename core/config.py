@@ -44,6 +44,19 @@ CARD_TTL_SEC = int(os.environ.get("CARD_TTL_SEC", "120"))
 BUDGET_RUB = float(os.environ.get("BUDGET_RUB", "50"))
 LLM_PRICE_RUB_PER_1M = float(os.environ.get("LLM_PRICE_RUB_PER_1M", "60"))
 
+# ── LLM-провайдеры: основной и запасной (бонус failover) ────────────────
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "none")
+LLM_SECONDARY_BASE_URL = os.environ.get("LLM_SECONDARY_BASE_URL", "")
+LLM_SECONDARY_MODEL = os.environ.get("LLM_SECONDARY_MODEL", "")
+LLM_SECONDARY_API_KEY = os.environ.get("LLM_SECONDARY_API_KEY", "none")
+LLM_SECONDARY_PRICE_RUB_PER_1M = float(os.environ.get("LLM_SECONDARY_PRICE_RUB_PER_1M", str(LLM_PRICE_RUB_PER_1M)))
+LLM_FAILOVER_COOLDOWN_SEC = float(os.environ.get("LLM_FAILOVER_COOLDOWN_SEC", "60"))
+
+# цена за 1M токенов по фактической модели: стоимость хода считается по ней
+PRICE_RUB_PER_1M = {LLM_MODEL: LLM_PRICE_RUB_PER_1M, LLM_SECONDARY_MODEL: LLM_SECONDARY_PRICE_RUB_PER_1M}
+
 # ── Ресурсы MCP-серверов (RFC 8707): canonical URI адресата токена ───────
 RESOURCES = {
     "crm": f"{STAND_URL}/crm",
