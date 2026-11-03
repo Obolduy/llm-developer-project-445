@@ -8,19 +8,81 @@
 
 События SSE хода: plan / card / reply / error / done.
 
-TODO(агенты):
-  1. lifespan: подключить LLM (config.setup_model(); в бонусе failover —
-     llm_pool.setup_pool(), если задан LLM_SECONDARY_BASE_URL).
-  2. CORS: allow_origins=["*"] — фронтенд живёт на другом порту стенда.
-  3. GET /api/health.
-  4. POST /api/session: sessions.open_session(login); ответ: session_id,
-     name, role, visible_tools — инструменты allowlist сессии
-     (с правами — permissions.visible_tools(...), до них — весь пул).
-  5. POST /api/chat: события хода через asyncio.Queue гонятся
-     StreamingResponse'ом (media_type="text/event-stream", формат
-     'data: {json}\\n\\n'); сбой хода — событие error, не падение потока.
-
 TODO(контракты): POST /api/cards/{pending_id}/decision — кнопка карточки:
   «да» → orchestrator.execute_pending, «нет» → отмена.
 """
 from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+from app import orchestrator, sessions
+from core import config
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    config.setup_model()
+    yield
+
+
+app = FastAPI(title="operator-chat-ai", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    return {"status": "ok", "service": "backend"}
+
+
+@app.post("/api/session")
+async def create_session(body: dict) -> dict:
+    login = body.get("user", "")
+    if login not in config.USERS:
+        raise HTTPException(400, f"неизвестный пользователь: {login}")
+    session = await sessions.open_session(login)
+    return {
+        "session_id": session.session_id,
+        "name": session.user.name,
+        "role": session.user.role,
+        "visible_tools": session.pool.tool_names(),
+    }
+
+
+@app.post("/api/chat")
+async def chat(body: dict) -> StreamingResponse:
+    session = sessions.get(body.get("session_id", ""))
+    if session is None:
+        raise HTTPException(404, "сессия не найдена — откройте новую")
+    message = str(body.get("message", "")).strip()
+    if not message:
+        raise HTTPException(400, "пустое сообщение")
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def turn() -> None:
+        try:
+            await orchestrator.run_turn(session, message, queue.put)
+        except Exception as e:  # noqa: BLE001 — сбой хода уходит событием, поток не падает
+            await queue.put({"type": "error", "detail": str(e)[:200]})
+        finally:
+            await queue.put({"type": "done"})
+
+    task = asyncio.create_task(turn())
+
+    async def stream():
+        try:
+            while True:
+                event = await queue.get()
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event["type"] == "done":
+                    break
+        finally:
+            task.cancel()
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
