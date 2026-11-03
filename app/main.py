@@ -7,21 +7,19 @@
   POST /api/cards/{pending_id}/decision  подтверждение карточки (с контрактов)
 
 События SSE хода: plan / card / reply / error / done.
-
-TODO(контракты): POST /api/cards/{pending_id}/decision — кнопка карточки:
-  «да» → orchestrator.execute_pending, «нет» → отмена.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app import orchestrator, sessions
+from app import cards, orchestrator, sessions
 from core import config
 
 
@@ -52,6 +50,24 @@ async def create_session(body: dict) -> dict:
         "role": session.user.role,
         "visible_tools": session.pool.tool_names(),
     }
+
+
+@app.post("/api/cards/{pending_id}/decision")
+async def decide_card(pending_id: str, body: dict) -> dict:
+    """Кнопка карточки: «да» исполняет, «нет» отменяет — код, не LLM."""
+    session = sessions.get(body.get("session_id", ""))
+    if session is None:
+        raise HTTPException(404, "сессия не найдена")
+    card = cards.active(session)
+    if card is None or card.pending_id != pending_id:
+        return {"outcome": "no_card", "text": "Карточка не найдена или истекла — попросите заново."}
+    if body.get("answer") == "yes":
+        session.trace_id = f"tr_{uuid.uuid4().hex[:12]}"
+        return {"outcome": "confirmed", "text": await orchestrator.execute_pending(session, card)}
+    if body.get("answer") == "no":
+        cards.settle(session, card, "rejected")
+        return {"outcome": "rejected", "text": orchestrator.CANCELLED}
+    raise HTTPException(400, "answer: yes|no")
 
 
 @app.post("/api/chat")
