@@ -101,7 +101,8 @@ async def run_turn(session, message: str, emit: Emit) -> None:
                 fresh = now
                 break  # карточка создана — дальше ждём подтверждения
 
-    editor = await run_agent(build_editor(session), editor_task(message, runs), trace_id=session.trace_id)
+    sources = _sources(runs)
+    editor = await run_agent(build_editor(session), editor_task(message, runs, sources), trace_id=session.trace_id)
 
     shown = editor["report"] + (f"\n{json.dumps(fresh.view, ensure_ascii=False)}" if fresh else "")
     out = await guardrail_client.check(shown, mode="output")
@@ -115,7 +116,7 @@ async def run_turn(session, message: str, emit: Emit) -> None:
         _guard_audit(session, "output", "guardrail_degraded", "ответ показан без проверки")
     if fresh is not None:
         await emit({"type": "card", "pending_id": fresh.pending_id, "card": fresh.public_view(ttl_sec=120)})
-    await emit({"type": "reply", "text": editor["report"], "sources": _sources(runs)})
+    await emit({"type": "reply", "text": editor["report"], "sources": sources})
 
 
 async def _answer_card(session, card, message: str, emit: Emit) -> bool:
