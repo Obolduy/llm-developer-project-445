@@ -8,10 +8,9 @@
 с лимитом. Решает политика, оркестратор только переводит reason на
 человеческий язык.
 
-TODO(guardrail) — guardrail: input-проверка реплики до всего хода (unsafe →
-  отказ, запись в аудит); output-проверка ответа и карточки до показа;
-  недоступный сервис → session.guard_state["ok"] = False (fail-closed
-  для действий), чтение продолжается.
+Guardrail проверяет текст дважды: реплику до LLM и ответ с карточкой до
+показа. Недоступный guardrail ставит guard_state["ok"] = False: чтение
+продолжается, а действия закрывает политика (guard_not_ok).
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 
-from app import audit, cards, idempotency, planner
+from app import audit, cards, guardrail_client, idempotency, planner
 from app.editor import build_editor, editor_task
 from app.llm import run_agent
 from app.sessions import pep_of
@@ -28,6 +27,7 @@ from app.workers import build_workers
 Emit = Callable[[dict], Awaitable[None]]
 
 CANCELLED = "Хорошо, отменяю. Ничего не изменено."
+UNSAFE = "Не могу выполнить эту просьбу. Если нужен человек — скажите, и я позову оператора."
 
 DENIED = {
     "confirmation_expired": "Подтверждение истекло — попросите операцию заново, я подготовлю новую карточку.",
@@ -35,6 +35,8 @@ DENIED = {
     "session_limit": "Лимит исчерпан: в одной сессии можно сменить тариф не больше двух раз. Могу позвать оператора.",
     "pdp_unavailable": "Действия сейчас недоступны: не работает проверка прав. "
                        "На вопросы отвечу, могу позвать оператора.",
+    "guard_not_ok": "Действия сейчас недоступны: не работает проверка безопасности. "
+                    "На вопросы отвечу, могу позвать оператора.",
 }
 
 
@@ -49,8 +51,22 @@ def _sources(runs: list[dict]) -> list[str]:
     return sorted(found)
 
 
+def _guard_audit(session, mode: str, outcome: str, detail: str = "") -> None:
+    audit.append(session.user.sub, f"guardrail:{mode}", outcome, trace_id=session.trace_id,
+                 session_id=session.session_id, detail=detail or None)
+
+
 async def run_turn(session, message: str, emit: Emit) -> None:
     session.trace_id = f"tr_{uuid.uuid4().hex[:12]}"
+
+    verdict = await guardrail_client.check(message, mode="input")
+    session.guard_state["ok"] = verdict.available and verdict.safe  # тот же dict читает PEP
+    if not verdict.available:
+        _guard_audit(session, "input", "guardrail_degraded", "чтение продолжено, действия закрыты")
+    elif not verdict.safe:
+        _guard_audit(session, "input", "guardrail_unsafe", verdict.category)
+        await emit({"type": "reply", "text": UNSAFE, "sources": []})
+        return
 
     card = cards.active(session)
     if card is not None and await _answer_card(session, card, message, emit):
@@ -86,6 +102,17 @@ async def run_turn(session, message: str, emit: Emit) -> None:
                 break  # карточка создана — дальше ждём подтверждения
 
     editor = await run_agent(build_editor(session), editor_task(message, runs), trace_id=session.trace_id)
+
+    shown = editor["report"] + (f"\n{json.dumps(fresh.view, ensure_ascii=False)}" if fresh else "")
+    out = await guardrail_client.check(shown, mode="output")
+    if out.available and not out.safe:
+        if fresh is not None:
+            cards.settle(session, fresh, "denied")
+        _guard_audit(session, "output", "guardrail_unsafe", out.category)
+        await emit({"type": "reply", "text": UNSAFE, "sources": []})
+        return
+    if not out.available:
+        _guard_audit(session, "output", "guardrail_degraded", "ответ показан без проверки")
     if fresh is not None:
         await emit({"type": "card", "pending_id": fresh.pending_id, "card": fresh.public_view(ttl_sec=120)})
     await emit({"type": "reply", "text": editor["report"], "sources": _sources(runs)})

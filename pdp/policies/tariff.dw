@@ -1,6 +1,8 @@
 // Политики write-пути агента мобильного оператора (Dogwood: Cedar + temporal).
 //
 // Цикл карточки: Prepare → ConfirmCard той же карточки → Execute.
+// Каждый permit требует guard_ok: без пройденной проверки текста guardrail
+// действие не готовится и не подтверждается (fail-closed).
 // Deny by default: оператору permit не подходит, отдельный forbid не нужен.
 // Forbid перекрывает permit — так держится лимит смен тарифа.
 
@@ -10,6 +12,7 @@ permit (principal, action == Tel::Action::"Prepare", resource)
 when {
     context.input.role == "client"
     && context.input.scopes.contains("tariffs:write")
+    && context.input.guard_ok
     && !(context.input has "user_id")
     && !(context.input has "account")
     && !(context.input has "subscriber")
@@ -22,6 +25,7 @@ permit (principal, action == Tel::Action::"ConfirmCard", resource)
 when {
     context.input.role == "client"
     && context.input.scopes.contains("tariffs:write")
+    && context.input.guard_ok
 }
 when temporal {
     formerly within 1h Tel::Action::"Prepare"::request{
@@ -35,6 +39,7 @@ permit (principal, action == Tel::Action::"Execute", resource)
 when {
     context.input.role == "client"
     && context.input.scopes.contains("tariffs:write")
+    && context.input.guard_ok
 }
 when temporal {
     formerly within 1h Tel::Action::"ConfirmCard"::request{
