@@ -1,8 +1,4 @@
-"""Клиент guardrail-сервиса: вердикт вероятностный, решения — за кодом.
-
-Недоступный сервис — не исключение: Verdict(safe=True, available=False).
-Чтение продолжается, а действия закрывает политика флагом guard_ok.
-"""
+"""Клиент guardrail: недоступный сервис — Verdict(safe=True, available=False), без исключения."""
 from __future__ import annotations
 
 from dataclasses import dataclass

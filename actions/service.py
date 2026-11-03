@@ -1,9 +1,4 @@
-"""Логика действий поверх REST-моков: предусловия, карточки, исполнение.
-
-prepare_* ничего не меняют: проверяют предусловия и собирают view для
-карточки. execute_action вызывает только код оркестратора после «да».
-Субъект sub сервер берёт из проверенного токена вызова, не из аргументов.
-"""
+"""Действия поверх REST-моков: prepare_* проверяют предусловия, execute_action исполняет."""
 from __future__ import annotations
 
 import json
@@ -13,7 +8,13 @@ try:
 except ImportError:  # pragma: no cover
     import httpx
 
-from actions.contracts import ActionError, normalize_email, normalize_phone, normalize_service, normalize_tariff
+from actions.contracts import (
+    ActionError,
+    normalize_email,
+    normalize_phone,
+    normalize_service,
+    normalize_tariff,
+)
 from core import config
 
 SERVICE_CATALOG = ["Музыка", "Роуминг", "Антивирус"]
@@ -57,7 +58,10 @@ async def prepare_tariff_change(sub: str, tariff_raw: str) -> dict:
 async def prepare_toggle_service(sub: str, service_raw: str, enabled: bool) -> dict:
     me = await _subscriber(sub)
     service = normalize_service(service_raw, SERVICE_CATALOG)
-    row = next((s for s in me["services"] if s["service"] == service), {"enabled": False, "price_rub": 0})
+    row = next((s for s in me["services"] if s["service"] == service), None)
+    if row is None:
+        raise ActionError("unknown_service", f"услуга «{service}» не подключается этому абоненту",
+                          available=[s["service"] for s in me["services"]])
     if row["enabled"] == enabled:
         code = "service_already_on" if enabled else "service_already_off"
         raise ActionError(code, f"услуга «{service}» уже {'подключена' if enabled else 'отключена'}")

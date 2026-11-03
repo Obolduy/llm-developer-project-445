@@ -1,10 +1,4 @@
-"""Права сессии: allowlist из claims, два барьера оркестратора.
-
-Роль задаёт набор операций, scope его сужает. Барьер 1 (visible_tools)
-работает при сборке агентов: запрещённого модель не видит. Барьер 2
-(admit) допускает «субъект × операция × объект» в момент вызова.
-execute_action нет ни в одном наборе — его вызывает только код.
-"""
+"""Права сессии: allowlist из claims, барьер 1 (visible_tools) и барьер 2 (admit)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

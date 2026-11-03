@@ -1,22 +1,4 @@
-"""Обёртки MCP-инструментов для агентов: вызов с JWT + учёт трейса.
-
-Готовая основа: MCP-инструмент превращается в FunctionTool агента;
-субъект вызова в Bearer-токене соединения; кривой JSON аргументов —
-машинно-читаемый ответ модели, сессия не роняется; ошибка MCP-сервера
-(MCPError, код + data с подсказками) — JSON tool-результат для модели.
-
-Крючок prepare_*: успешная подготовка создаёт карточку подтверждения,
-модель получает «карточка готова, спроси да/нет» и исполнить сама не может.
-
-Барьер 1: wrap_tools собирает только инструменты allowlist сессии.
-Барьер 2: admit перед каждым вызовом; отказ — модели и в аудит.
-
-Каждый tool-вызов модели пишется в tool_calls (исход, задержка, обрезанные
-аргументы), включая вызовы с кривыми аргументами; тикет — ещё и в аудит.
-
-Карточка живёт только с Allow политики (pep.prepare): Deny — карточки нет,
-модель получает отказ с reason, отказ ложится в аудит.
-"""
+"""MCP-инструменты как FunctionTool: барьеры прав, tool_calls, карточка на prepare_*."""
 from __future__ import annotations
 
 import json
@@ -27,8 +9,8 @@ from agents.run_context import RunContextWrapper
 from mcp.shared.exceptions import MCPError
 
 from app import audit, cards, permissions
-from core import db
 from app.sessions import Session, pep_of
+from core import config, db
 
 
 async def _card_reply(session: Session, name: str, result) -> dict:
@@ -48,7 +30,7 @@ async def _card_reply(session: Session, name: str, result) -> dict:
         }
     return {
         "card_created": True,
-        "card": card.public_view(ttl_sec=120),
+        "card": card.public_view(ttl_sec=config.CARD_TTL_SEC),
         "next": "перескажи карточку и спроси подтверждение «да/нет»; исполнить сам ты не можешь",
     }
 

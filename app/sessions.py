@@ -15,10 +15,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
+from app import permissions
 from core import config, db
 from core.mcpclient import McpPool
 from core.tokens import Tokens
-from app import permissions
 
 
 @dataclass
@@ -27,15 +27,15 @@ class Session:
     user: config.User
     tokens: Tokens
     pool: McpPool
-    claims: dict = field(default_factory=dict)            # claims токена сессии
-    allowlist: permissions.Allowlist | None = None        # права из claims
+    claims: dict = field(default_factory=dict)
+    allowlist: permissions.Allowlist | None = None
     thread: list = field(default_factory=list)   # история планировщика
     trace: list[str] = field(default_factory=list)
     trace_id: str = ""                           # сквозной id текущего хода
     planner: object | None = None                # собирается лениво на первом ходе
     pending_card: object | None = None           # живая карточка подтверждения
-    pep: object | None = None                    # клиент PDP, заводится лениво
-    guard_state: dict = field(default_factory=lambda: {"ok": True})  # вердикт guardrail хода
+    pep: object | None = None
+    guard_state: dict = field(default_factory=lambda: {"ok": True})  # PEP держит ссылку на этот dict
     session_id: str = field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:8]}")
 
     def note(self, tool: str) -> None:

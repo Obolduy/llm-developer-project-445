@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     from app import llm_pool
 
     if config.LLM_SECONDARY_BASE_URL:
-        llm_pool.setup_pool()  # бонус: два провайдера с переключением
+        llm_pool.setup_pool()
     else:
         config.setup_model()
     yield
@@ -59,15 +59,14 @@ async def create_session(body: dict) -> dict:
 
 @app.post("/api/cards/{pending_id}/decision")
 async def decide_card(pending_id: str, body: dict) -> dict:
-    """Кнопка карточки: «да» исполняет, «нет» отменяет — код, не LLM."""
     session = sessions.get(body.get("session_id", ""))
     if session is None:
         raise HTTPException(404, "сессия не найдена")
     card = cards.active(session)
     if card is None or card.pending_id != pending_id:
         return {"outcome": "no_card", "text": "Карточка не найдена или истекла — попросите заново."}
+    session.trace_id = f"tr_{uuid.uuid4().hex[:12]}"
     if body.get("answer") == "yes":
-        session.trace_id = f"tr_{uuid.uuid4().hex[:12]}"
         return {"outcome": "confirmed", "text": await orchestrator.execute_pending(session, card)}
     if body.get("answer") == "no":
         orchestrator.reject(session, card)

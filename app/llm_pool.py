@@ -1,14 +1,7 @@
-"""Пул из двух LLM-провайдеров с политикой переключения (бонус failover).
+"""Пул из двух LLM-провайдеров с переключением, встроен на уровне клиента SDK.
 
-Пул встроен на уровне клиента: set_default_openai_client получает клиента,
-у которого chat.completions.create идёт через call(). Агенты о провайдерах
-не знают и не пересобираются.
-
-Политика:
-  - 429, 5xx, таймаут и сетевая ошибка → следующий провайдер;
-    400/401/403 не повторяются: у другого провайдера ошибка будет той же;
-  - провайдер с 429/5xx/таймаутом выпадает из пула на LLM_FAILOVER_COOLDOWN_SEC;
-  - пул обходится один раз; фактический провайдер запуска — в tracking().
+429, 5xx, таймаут и сетевая ошибка — к следующему провайдеру, упавший выпадает
+на LLM_FAILOVER_COOLDOWN_SEC. 400/401/403 не повторяются.
 """
 from __future__ import annotations
 
@@ -86,7 +79,11 @@ def _client(base_url: str, api_key: str) -> AsyncOpenAI:
 
 def setup_pool() -> str:
     """Два провайдера из .env и клиент-переключатель по умолчанию для SDK."""
-    from agents import set_default_openai_api, set_default_openai_client, set_tracing_disabled
+    from agents import (
+        set_default_openai_api,
+        set_default_openai_client,
+        set_tracing_disabled,
+    )
 
     PROVIDERS[:] = [
         Provider("primary", config.LLM_MODEL, _client(config.LLM_BASE_URL, config.LLM_API_KEY)),

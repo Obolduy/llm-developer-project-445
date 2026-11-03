@@ -1,16 +1,7 @@
-"""Оркестратор хода: карточка → план → гейт → доменные агенты → редактор → SSE.
+"""Оркестратор хода: guardrail → карточка → план → агенты → редактор → SSE.
 
-Ход — один запрос абонента. Пока жива карточка подтверждения, ответ на
-неё разбирает код без LLM: «да» исполняет, «нет» отменяет, «оператор»
-эскалирует, смена темы идёт обычным ходом, и карточка остаётся живой.
-
-«Да» проходит PDP дважды: ConfirmCard той же карточки, затем Execute
-с лимитом. Решает политика, оркестратор только переводит reason на
-человеческий язык.
-
-Guardrail проверяет текст дважды: реплику до LLM и ответ с карточкой до
-показа. Недоступный guardrail ставит guard_state["ok"] = False: чтение
-продолжается, а действия закрывает политика (guard_not_ok).
+Ответ на живую карточку разбирает код без LLM. «Да» проходит PDP дважды
+(ConfirmCard, Execute), оркестратор только переводит reason на человеческий язык.
 """
 from __future__ import annotations
 
@@ -23,6 +14,7 @@ from app.editor import build_editor, editor_task
 from app.llm import run_agent
 from app.sessions import pep_of
 from app.workers import build_workers
+from core import config
 
 Emit = Callable[[dict], Awaitable[None]]
 
@@ -99,7 +91,7 @@ async def run_turn(session, message: str, emit: Emit) -> None:
             now = cards.active(session)
             if now is not None and now is not card:
                 fresh = now
-                break  # карточка создана — дальше ждём подтверждения
+                break
 
     sources = _sources(runs)
     editor = await run_agent(build_editor(session), editor_task(message, runs, sources), trace_id=session.trace_id)
@@ -115,7 +107,7 @@ async def run_turn(session, message: str, emit: Emit) -> None:
     if not out.available:
         _guard_audit(session, "output", "guardrail_degraded", "ответ показан без проверки")
     if fresh is not None:
-        await emit({"type": "card", "pending_id": fresh.pending_id, "card": fresh.public_view(ttl_sec=120)})
+        await emit({"type": "card", "pending_id": fresh.pending_id, "card": fresh.public_view(ttl_sec=config.CARD_TTL_SEC)})
     await emit({"type": "reply", "text": editor["report"], "sources": sources})
 
 

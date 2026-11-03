@@ -1,15 +1,6 @@
-"""Guardrail-сервис: отдельный stateless-контур проверки текста.
+"""Guardrail: проверка текста маркерами атак (RULE) или HiveTraceGuard-Pro (GUARDRAIL_MODEL=1).
 
     uvicorn --factory guardrail.service:build_app --host 127.0.0.1 --port 8300
-
-POST /check {"text", "mode": "input"|"output"} → safe или unsafe с категорией.
-Движок по умолчанию RULE — маркеры атак стенда; это лабораторная эвристика,
-для продакшена её мало. GUARDRAIL_MODEL=1 включает HiveTraceGuard-Pro
-(transformers и torch в requirements не входят). /admin/down и /admin/up
-имитируют отказ сервиса.
-
-Guardrail только ставит флаг. Права решает политика, а недоступный сервис
-оркестратор переживает сам: чтение идёт, действия закрыты.
 """
 from __future__ import annotations
 

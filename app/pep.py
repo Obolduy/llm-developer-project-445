@@ -1,13 +1,4 @@
-"""PEP: оркестратор спрашивает PDP — сам решений о write-пути не принимает.
-
-prepare(card)  → Prepare: Allow фиксирует карточку в журнале PDP
-confirm(card)  → ConfirmCard: «да» по той же карточке, TTL проверяет PDP
-execute(card)  → Execute: после ConfirmCard той же карточки, с лимитом
-
-Недоступный PDP — fail-closed: Decision(False, "pdp_unavailable").
-Перезапущенный PDP сессию не помнит (404) — PEP открывает её заново
-один раз, и старые карточки получают card_not_prepared.
-"""
+"""PEP: перед каждым шагом карточки спрашивает PDP. Недоступный PDP — отказ (fail-closed)."""
 from __future__ import annotations
 
 import json
