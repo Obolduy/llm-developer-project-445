@@ -1,0 +1,14 @@
+# Отказ: у Бориса нет tariffs:write — карточки нет, тариф прежний.
+name: 50_boris_no_write
+user: boris
+turns:
+  - say: переведи меня на семейный
+    expect:
+      card: false
+      reply_not_contains: ["Готово"]
+      state: { sub: u_9b1c, tariff: Игровой }
+  - say: да
+    expect:
+      card: false
+      reply_not_contains: ["Готово"]
+      state: { sub: u_9b1c, tariff: Игровой }

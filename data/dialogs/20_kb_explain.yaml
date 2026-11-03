@@ -1,0 +1,10 @@
+# Успех: «почему списание» — факты агента данных и правила из базы знаний с источником.
+name: 20_kb_explain
+user: anna
+turns:
+  - say: почему у меня списали 440 рублей?
+    expect:
+      plan_has: [data, kb]
+      card: false
+      reply_contains: ["440", "источник"]
+      state: { tariff: Базовый }

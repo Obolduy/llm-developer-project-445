@@ -1,0 +1,13 @@
+# Успех: отключение услуги через карточку и «да».
+name: 80_service_toggle
+user: anna
+turns:
+  - say: отключи услугу Музыка
+    expect:
+      plan_has: [tariff]
+      card: true
+      state: { service: { name: Музыка, enabled: true } }
+  - say: да
+    expect:
+      reply_contains: ["отово"]
+      state: { service: { name: Музыка, enabled: false } }

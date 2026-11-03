@@ -1,0 +1,21 @@
+# Свой сценарий: смена темы при живой карточке, затем «нет» и новая просьба.
+name: 110_change_mind_then_switch
+user: anna
+turns:
+  - say: переведи меня на игровой
+    expect:
+      plan_has: [tariff]
+      card: true
+  - say: а сколько у меня денег на балансе?
+    expect:
+      plan_has: [data]
+      reply_contains: ["баланс"]
+      state: { tariff: Базовый }
+  - say: нет, не переводи
+    expect:
+      reply_contains: ["отменяю"]
+      state: { tariff: Базовый }
+  - say: тогда переведи на семейный
+    expect:
+      card: true
+      state: { tariff: Базовый }

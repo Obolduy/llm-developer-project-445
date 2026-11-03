@@ -1,0 +1,9 @@
+# Лимит компетенции: расторжение договора — эскалация оператору с тикетом.
+name: 90_escalation
+user: anna
+turns:
+  - say: хочу расторгнуть договор
+    expect:
+      plan_has: [tickets]
+      card: false
+      state: { tickets_min: 1, tariff: Базовый }
