@@ -9,20 +9,34 @@
 
 ## Стек
 
-- Python
+- Python 3.12, OpenAI Agents SDK, MCP (streamable HTTP), FastAPI
+- PostgreSQL 16 + pgvector, Dogwood (политики), JWT RS256
 
 ## Установка
-
-<!-- Опишите установку: клонирование, зависимости, переменные окружения -->
 
 ```bash
 git clone https://github.com/Obolduy/llm-developer-project-445.git
 cd llm-developer-project-445
+python3.12 -m venv .venv && source .venv/bin/activate
+make install
+cp .env.example .env   # LLM_BASE_URL, LLM_MODEL, LLM_API_KEY; PG_PORT/PG_DSN, если 5434 занят
+make infra && make migrate && make seed
 ```
 
 ## Использование
 
-<!-- Добавьте примеры запуска и запись asciinema — именно это смотрит работодатель -->
+Каждый процесс в своём терминале:
+
+```bash
+make stand       # :8100 стенд, веб-чат http://127.0.0.1:8100
+make actions     # :8220 action-MCP
+make pdp         # :9100 политики Dogwood
+make guardrail   # :8300 guardrail
+make api         # :8000 бэкенд с оркестратором
+```
+
+Проверки: `make smoke` (без модели), `make scenarios` (на живой модели), `make reset` —
+вернуть демо-данные. Отчёт приёмки — [ACCEPTANCE.md](ACCEPTANCE.md).
 
 ---
 

@@ -13,7 +13,8 @@ from app.wrap import wrap_tools
 CATALOG: dict[str, dict] = {
     "data": {
         "title": "агент данных",
-        "tools": ["get_my_profile", "get_my_tariff", "list_tariffs", "list_my_charges"],
+        # get_subscriber_overview увидит только оператор: остальным его срежет барьер 1
+        "tools": ["get_my_profile", "get_my_tariff", "list_tariffs", "list_my_charges", "get_subscriber_overview"],
     },
     "kb": {
         "title": "агент базы знаний",
@@ -35,7 +36,8 @@ CATALOG: dict[str, dict] = {
 DATA_PROMPT = """\
 Ты агент данных абонента мобильного оператора. Выполни задачу: вызови
 нужные инструменты и доложи факты по-русски, коротко, только то, что
-вернули инструменты. Ничего не выдумывай.
+вернули инструменты. Ничего не выдумывай. Если просят обзор абонента
+по его id и у тебя есть get_subscriber_overview — вызови его с subscriber_id.
 """
 
 KB_PROMPT = """\

@@ -1,0 +1,10 @@
+# Успех оператора: обзор абонента без операций записи.
+name: 120_operator_overview
+user: olga
+turns:
+  - say: покажи обзор абонента u_4f2a
+    expect:
+      plan_has: [data]
+      card: false
+      reply_contains: ["Анна"]
+      state: { tariff: Базовый }
