@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from core import config, db
 from core.mcpclient import McpPool
 from core.tokens import Tokens
+from app import permissions
 
 
 @dataclass
@@ -26,6 +27,8 @@ class Session:
     user: config.User
     tokens: Tokens
     pool: McpPool
+    claims: dict = field(default_factory=dict)            # claims токена сессии
+    allowlist: permissions.Allowlist | None = None        # права из claims
     thread: list = field(default_factory=list)   # история планировщика
     trace: list[str] = field(default_factory=list)
     trace_id: str = ""                           # сквозной id текущего хода
@@ -46,10 +49,14 @@ async def open_session(login: str) -> Session:
         raise KeyError(f"неизвестный пользователь: {login}")
 
     tokens = Tokens(login)
+    claims = await tokens.claims("crm")
     pool = McpPool(tokens, resource_keys=("crm", "billing", "kb", "actions"))
     await pool.connect()
 
-    session = Session(login=login, user=user, tokens=tokens, pool=pool)
+    session = Session(
+        login=login, user=user, tokens=tokens, pool=pool,
+        claims=claims, allowlist=permissions.allowlist_from_claims(claims),
+    )
     db.execute(
         "insert into sessions(session_id, login, sub) values (%s, %s, %s)",
         (session.session_id, login, user.sub),

@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app import cards, orchestrator, sessions
+from app import cards, orchestrator, permissions, sessions
 from core import config
 
 
@@ -48,7 +48,7 @@ async def create_session(body: dict) -> dict:
         "session_id": session.session_id,
         "name": session.user.name,
         "role": session.user.role,
-        "visible_tools": session.pool.tool_names(),
+        "visible_tools": permissions.visible_tools(session.allowlist, session.pool.tool_names()),
     }
 
 

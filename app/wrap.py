@@ -7,18 +7,15 @@
 
 Крючок prepare_*: успешная подготовка создаёт карточку подтверждения,
 модель получает «карточка готова, спроси да/нет» и исполнить сама не может.
-Пока в контрактах есть sub, обёртка прячет его из схемы и подставляет сама.
+
+Барьер 1: wrap_tools собирает только инструменты allowlist сессии.
+Барьер 2: admit перед каждым вызовом; отказ — модели и в аудит.
 
 Каждый tool-вызов модели пишется в tool_calls (исход, задержка, обрезанные
 аргументы), включая вызовы с кривыми аргументами; тикет — ещё и в аудит.
 
-TODO(права): два барьера —
-  wrap_tools: фильтровать имена через permissions.visible_tools
-  (барьер 1: модель не видит запрещённого);
-  invoke: permissions.admit(session.allowlist, name, args) перед вызовом
-  (барьер 2: отказ → {"error": "denied", "reason"} + запись в аудит);
-  подготовленную карточку проводить через pep.prepare — Deny → карточки
-  нет, модель получает отказ с reason.
+TODO(права): подготовленную карточку проводить через pep.prepare — Deny →
+  карточки нет, модель получает отказ с reason.
 """
 from __future__ import annotations
 
@@ -29,15 +26,9 @@ from agents import FunctionTool
 from agents.run_context import RunContextWrapper
 from mcp.shared.exceptions import MCPError
 
-from app import audit, cards
+from app import audit, cards, permissions
 from core import db
 from app.sessions import Session
-
-
-def _schema_without_sub(schema: dict) -> dict:
-    props = {k: v for k, v in (schema.get("properties") or {}).items() if k != "sub"}
-    required = [k for k in schema.get("required", []) if k != "sub"]
-    return {**schema, "properties": props, "required": required}
 
 
 def _card_reply(session: Session, name: str, result) -> dict:
@@ -54,8 +45,6 @@ def _card_reply(session: Session, name: str, result) -> dict:
 
 def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
     """Обёртка одного MCP-инструмента для агента этой сессии."""
-    schema = session.pool.tool_schema(name)
-    needs_sub = "sub" in (schema.get("properties") or {})
 
     async def invoke(ctx: RunContextWrapper, input_json: str) -> str:
         started = time.perf_counter()
@@ -75,8 +64,16 @@ def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
                 {"error": "bad_arguments", "detail": "аргументы — не JSON; повтори вызов по схеме"},
                 ensure_ascii=False,
             )
-        if needs_sub:
-            args["sub"] = session.user.sub
+        decision = permissions.admit(session.allowlist, name, args)
+        if not decision.allowed:
+            log(args, f"denied:{decision.reason}")
+            audit.append(session.user.sub, name, "denied", trace_id=session.trace_id,
+                         session_id=session.session_id, args=args, detail=f"barrier2 {decision.reason}")
+            return json.dumps(
+                {"error": "denied", "reason": decision.reason,
+                 "detail": "операция недоступна этому пользователю; можно предложить оператора"},
+                ensure_ascii=False,
+            )
         session.note(name)
         try:
             result = await session.pool.call(session.pool.resource_of(name), name, args)
@@ -99,12 +96,12 @@ def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
     return FunctionTool(
         name=name,
         description=session.pool.tool_description(name),
-        params_json_schema=_schema_without_sub(schema) if needs_sub else schema,
+        params_json_schema=session.pool.tool_schema(name),
         on_invoke_tool=invoke,
     )
 
 
 def wrap_tools(session: Session, names: list[str]) -> list[FunctionTool]:
-    """Собрать обёртки для перечня имён (какие имена давать — решает код)."""
-    known = set(session.pool.tool_names())
-    return [wrap_mcp_tool(session, n) for n in names if n in known]
+    """Барьер 1: обёртки только для известных и разрешённых сессии инструментов."""
+    visible = set(permissions.visible_tools(session.allowlist, session.pool.tool_names()))
+    return [wrap_mcp_tool(session, n) for n in names if n in visible]

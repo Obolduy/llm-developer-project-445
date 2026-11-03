@@ -117,7 +117,6 @@ async def execute_pending(session, card) -> str:
     stored = await idempotency.execute(
         key, card.sub, card.action,
         lambda: session.pool.call("actions", "execute_action", {
-            "sub": card.sub,
             "action": card.action,
             "details_json": json.dumps(card.details, ensure_ascii=False),
             "pending_id": card.pending_id,
@@ -143,7 +142,6 @@ async def execute_pending(session, card) -> str:
 
 async def escalate(session, card, reason: str) -> str:
     result = await session.pool.call("actions", "create_ticket", {
-        "sub": session.user.sub,
         "subject": f"эскалация: {card.view.get('что', card.action)}",
         "note": f"{reason}; карточка: {json.dumps(card.view, ensure_ascii=False)}",
     })
