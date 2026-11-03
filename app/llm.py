@@ -3,8 +3,7 @@
 output_type подключается нестрогой схемой: строгий JSON-режим слишком
 требователен к малым моделям.
 
-TODO(аудит): в run_agent — INSERT в llm_calls: trace_id, имя агента,
-  модель, токены (result.context_wrapper.usage), латентность.
+Каждый запуск агента пишется в llm_calls: модель, токены, задержка.
 
 TODO(failover): если llm_pool.enabled() — запуск через
   llm_pool.run_with_failover, в llm_calls — фактический провайдер.
@@ -16,7 +15,7 @@ import time
 
 from agents import Agent, AgentOutputSchema, Runner
 
-from core import config
+from core import config, db
 
 
 def build_agent(name: str, instructions: str, tools=None, output_type=None) -> Agent:
@@ -42,10 +41,24 @@ def _loads(value):
         return value
 
 
-async def run_agent(agent: Agent, task: str, *, trace_id: str = "") -> dict:
-    """Один Runner.run → {"report", "tools": [{"tool", "args", "result"}], "seconds"}."""
+async def run_logged(agent: Agent, run_input, *, trace_id: str = ""):
+    """Runner.run + строка в llm_calls (токены из usage, задержка вокруг запуска)."""
     started = time.perf_counter()
-    result = await Runner.run(agent, task)
+    result = await Runner.run(agent, run_input)
+    usage = result.context_wrapper.usage
+    db.execute(
+        "insert into llm_calls(trace_id, agent, model, input_tokens, output_tokens, latency_ms)"
+        " values (%s, %s, %s, %s, %s, %s)",
+        (trace_id or None, agent.name, config.MODEL_NAME, usage.input_tokens or 0,
+         usage.output_tokens or 0, int((time.perf_counter() - started) * 1000)),
+    )
+    return result
+
+
+async def run_agent(agent: Agent, task: str, *, trace_id: str = "") -> dict:
+    """Один запуск агента → {"report", "tools": [{"tool", "args", "result"}], "seconds"}."""
+    started = time.perf_counter()
+    result = await run_logged(agent, task, trace_id=trace_id)
     seconds = time.perf_counter() - started
 
     outputs = {

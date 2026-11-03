@@ -9,8 +9,8 @@
 модель получает «карточка готова, спроси да/нет» и исполнить сама не может.
 Пока в контрактах есть sub, обёртка прячет его из схемы и подставляет сама.
 
-TODO(аудит): каждый tool-вызов модели → таблицу tool_calls
-  (trace_id, tool, args — обрезанные, outcome, latency_ms).
+Каждый tool-вызов модели пишется в tool_calls (исход, задержка, обрезанные
+аргументы), включая вызовы с кривыми аргументами; тикет — ещё и в аудит.
 
 TODO(права): два барьера —
   wrap_tools: фильтровать имена через permissions.visible_tools
@@ -23,12 +23,14 @@ TODO(права): два барьера —
 from __future__ import annotations
 
 import json
+import time
 
 from agents import FunctionTool
 from agents.run_context import RunContextWrapper
 from mcp.shared.exceptions import MCPError
 
-from app import cards
+from app import audit, cards
+from core import db
 from app.sessions import Session
 
 
@@ -56,9 +58,19 @@ def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
     needs_sub = "sub" in (schema.get("properties") or {})
 
     async def invoke(ctx: RunContextWrapper, input_json: str) -> str:
+        started = time.perf_counter()
+
+        def log(args, outcome: str) -> None:
+            db.execute(
+                "insert into tool_calls(trace_id, tool, args, outcome, latency_ms) values (%s, %s, %s, %s, %s)",
+                (session.trace_id or None, name, json.dumps(args, ensure_ascii=False)[:400], outcome[:60],
+                 int((time.perf_counter() - started) * 1000)),
+            )
+
         try:
             args = json.loads(input_json) if input_json and input_json.strip() else {}
         except (TypeError, ValueError):
+            log({"raw": str(input_json)[:200]}, "bad_arguments")
             return json.dumps(
                 {"error": "bad_arguments", "detail": "аргументы — не JSON; повтори вызов по схеме"},
                 ensure_ascii=False,
@@ -70,12 +82,18 @@ def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
             result = await session.pool.call(session.pool.resource_of(name), name, args)
         except MCPError as e:
             data = e.data if isinstance(e.data, dict) else {}
+            log(args, str(getattr(e, "message", "tool_error")))
             return json.dumps(
                 {"error": getattr(e, "message", "tool_failed")[:60], **data},
                 ensure_ascii=False,
             )
         except Exception as e:  # noqa: BLE001 — сбой сервера становится данными для модели
+            log(args, "tool_failed")
             return json.dumps({"error": "tool_failed", "detail": str(e)[:160]}, ensure_ascii=False)
+        log(args, "ok")
+        if name == "create_ticket":
+            audit.append(session.user.sub, name, "escalated", trace_id=session.trace_id,
+                         session_id=session.session_id, detail=result.get("ticket_id"))
         return json.dumps(_card_reply(session, name, result), ensure_ascii=False)
 
     return FunctionTool(

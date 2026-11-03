@@ -84,9 +84,9 @@ def gate(plan: Plan) -> tuple[Plan, list[str]]:
     return Plan(steps=kept, question=plan.question), dropped
 
 
-async def next_plan(planner, history: list, message: str) -> tuple[Plan, list]:
+async def next_plan(planner, history: list, message: str, *, trace_id: str = "") -> tuple[Plan, list]:
     """Один вызов планировщика по истории диалога → (план, новая история)."""
-    from agents import Runner
+    from app import llm
 
-    result = await Runner.run(planner, [*history, {"role": "user", "content": message}])
+    result = await llm.run_logged(planner, [*history, {"role": "user", "content": message}], trace_id=trace_id)
     return result.final_output, result.to_input_list()

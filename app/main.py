@@ -65,7 +65,7 @@ async def decide_card(pending_id: str, body: dict) -> dict:
         session.trace_id = f"tr_{uuid.uuid4().hex[:12]}"
         return {"outcome": "confirmed", "text": await orchestrator.execute_pending(session, card)}
     if body.get("answer") == "no":
-        cards.settle(session, card, "rejected")
+        orchestrator.reject(session, card)
         return {"outcome": "rejected", "text": orchestrator.CANCELLED}
     raise HTTPException(400, "answer: yes|no")
 

@@ -4,10 +4,6 @@
 неё разбирает код без LLM: «да» исполняет, «нет» отменяет, «оператор»
 эскалирует, смена темы идёт обычным ходом, и карточка остаётся живой.
 
-TODO(аудит) — аудит: audit.append на все исходы пути действия
-  (executed с before/after, duplicate_suppressed, rejected_by_user,
-  server_limit, escalated).
-
 TODO(права) — права: «да» → PEP: pep.confirm → pep.execute; при Deny —
   человекочитаемый отказ по reason (session_limit, confirmation_expired,
   card_not_prepared, pdp_unavailable).
@@ -23,7 +19,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 
-from app import cards, idempotency, planner
+from app import audit, cards, idempotency, planner
 from app.editor import build_editor, editor_task
 from app.llm import run_agent
 from app.workers import build_workers
@@ -53,7 +49,9 @@ async def run_turn(session, message: str, emit: Emit) -> None:
 
     if session.planner is None:
         session.planner = planner.build_planner()
-    raw, session.thread = await planner.next_plan(session.planner, session.thread, message)
+    raw, session.thread = await planner.next_plan(
+        session.planner, session.thread, message, trace_id=session.trace_id
+    )
     plan, dropped = planner.gate(raw)
     for reason in dropped:
         session.note(f"plan_dropped:{reason}")
@@ -93,13 +91,23 @@ async def _answer_card(session, card, message: str, emit: Emit) -> bool:
     if answer == "yes":
         text = await execute_pending(session, card)
     elif answer == "no":
-        cards.settle(session, card, "rejected")
+        reject(session, card)
         text = CANCELLED
     else:
         cards.settle(session, card, "rejected")
         text = await escalate(session, card, "абонент попросил оператора")
     await emit({"type": "reply", "text": text, "sources": []})
     return True
+
+
+def _audit(session, card, outcome: str, **kw) -> None:
+    audit.append(card.sub, card.action, outcome, trace_id=session.trace_id,
+                 session_id=session.session_id, **kw)
+
+
+def reject(session, card) -> None:
+    cards.settle(session, card, "rejected")
+    _audit(session, card, "rejected_by_user", args=card.details)
 
 
 async def execute_pending(session, card) -> str:
@@ -116,13 +124,20 @@ async def execute_pending(session, card) -> str:
             "idempotency_key": key,
         }),
     )
-    outcome = stored.result.get("outcome") or stored.result.get("error") or "error"
+    result = stored.result
+    outcome = result.get("outcome") or result.get("error") or "error"
+    args = {**card.details, "pending_id": card.pending_id}
     if stored.duplicate or outcome == "duplicate":
+        _audit(session, card, "duplicate_suppressed", args=args, idempotency_key=key)
         return "Эта операция уже исполнена — повтор не выполнялся."
     if outcome in idempotency.SUCCESS:
+        _audit(session, card, "executed", args=args, idempotency_key=key,
+               before=result.get("before"), after=result.get("after"))
         return f"Готово, операция «{card.view.get('что', card.action)}» выполнена."
     if outcome == "daily_limit":
+        _audit(session, card, "server_limit", args=args, detail="billing daily_limit")
         return "Биллинг отклонил операцию: дневной лимит смен тарифа исчерпан. Могу позвать оператора."
+    _audit(session, card, "rejected_by_contract", args=args, detail=outcome)
     return f"Операция не выполнена: {outcome}."
 
 
@@ -132,4 +147,6 @@ async def escalate(session, card, reason: str) -> str:
         "subject": f"эскалация: {card.view.get('что', card.action)}",
         "note": f"{reason}; карточка: {json.dumps(card.view, ensure_ascii=False)}",
     })
-    return f"Передаю диалог оператору, тикет {result.get('ticket_id', '?')}."
+    ticket = result.get("ticket_id", "?")
+    _audit(session, card, "escalated", args={"reason": reason}, detail=ticket)
+    return f"Передаю диалог оператору, тикет {ticket}."
