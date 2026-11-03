@@ -34,6 +34,8 @@ class Session:
     trace_id: str = ""                           # сквозной id текущего хода
     planner: object | None = None                # собирается лениво на первом ходе
     pending_card: object | None = None           # живая карточка подтверждения
+    pep: object | None = None                    # клиент PDP, заводится лениво
+    guard_state: dict = field(default_factory=lambda: {"ok": True})  # вердикт guardrail хода
     session_id: str = field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:8]}")
 
     def note(self, tool: str) -> None:
@@ -63,6 +65,15 @@ async def open_session(login: str) -> Session:
     )
     SESSIONS[session.session_id] = session
     return session
+
+
+def pep_of(session: Session):
+    """PEP сессии: создаётся при первом обращении, дальше тот же."""
+    from app.pep import Pep
+
+    if session.pep is None:
+        session.pep = Pep(session.session_id, session.claims, session.guard_state)
+    return session.pep
 
 
 def get(session_id: str) -> Session | None:

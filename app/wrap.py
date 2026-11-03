@@ -14,8 +14,8 @@
 Каждый tool-вызов модели пишется в tool_calls (исход, задержка, обрезанные
 аргументы), включая вызовы с кривыми аргументами; тикет — ещё и в аудит.
 
-TODO(права): подготовленную карточку проводить через pep.prepare — Deny →
-  карточки нет, модель получает отказ с reason.
+Карточка живёт только с Allow политики (pep.prepare): Deny — карточки нет,
+модель получает отказ с reason, отказ ложится в аудит.
 """
 from __future__ import annotations
 
@@ -28,14 +28,24 @@ from mcp.shared.exceptions import MCPError
 
 from app import audit, cards, permissions
 from core import db
-from app.sessions import Session
+from app.sessions import Session, pep_of
 
 
-def _card_reply(session: Session, name: str, result) -> dict:
-    """Успешный prepare_* → карточка; модели — только просьба спросить «да/нет»."""
+async def _card_reply(session: Session, name: str, result) -> dict:
+    """Успешный prepare_* → карточка с Allow политики; модели — просьба спросить «да/нет»."""
     if not (name.startswith("prepare_") and isinstance(result, dict) and result.get("ok")):
         return result
     card = cards.create(session, result["action"], result["details"], result["view"])
+    decision = await pep_of(session).prepare(card)
+    if not decision.allowed:
+        cards.settle(session, card, "denied")
+        audit.append(session.user.sub, card.action, "denied", trace_id=session.trace_id,
+                     session_id=session.session_id, args=card.details, detail=f"pdp Prepare {decision.reason}")
+        return {
+            "card_denied": True,
+            "reason": decision.reason,
+            "next": "скажи абоненту, что операция сейчас недоступна, и предложи оператора",
+        }
     return {
         "card_created": True,
         "card": card.public_view(ttl_sec=120),
@@ -91,7 +101,7 @@ def wrap_mcp_tool(session: Session, name: str) -> FunctionTool:
         if name == "create_ticket":
             audit.append(session.user.sub, name, "escalated", trace_id=session.trace_id,
                          session_id=session.session_id, detail=result.get("ticket_id"))
-        return json.dumps(_card_reply(session, name, result), ensure_ascii=False)
+        return json.dumps(await _card_reply(session, name, result), ensure_ascii=False)
 
     return FunctionTool(
         name=name,

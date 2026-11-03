@@ -4,9 +4,9 @@
 неё разбирает код без LLM: «да» исполняет, «нет» отменяет, «оператор»
 эскалирует, смена темы идёт обычным ходом, и карточка остаётся живой.
 
-TODO(права) — права: «да» → PEP: pep.confirm → pep.execute; при Deny —
-  человекочитаемый отказ по reason (session_limit, confirmation_expired,
-  card_not_prepared, pdp_unavailable).
+«Да» проходит PDP дважды: ConfirmCard той же карточки, затем Execute
+с лимитом. Решает политика, оркестратор только переводит reason на
+человеческий язык.
 
 TODO(guardrail) — guardrail: input-проверка реплики до всего хода (unsafe →
   отказ, запись в аудит); output-проверка ответа и карточки до показа;
@@ -22,11 +22,20 @@ from collections.abc import Awaitable, Callable
 from app import audit, cards, idempotency, planner
 from app.editor import build_editor, editor_task
 from app.llm import run_agent
+from app.sessions import pep_of
 from app.workers import build_workers
 
 Emit = Callable[[dict], Awaitable[None]]
 
 CANCELLED = "Хорошо, отменяю. Ничего не изменено."
+
+DENIED = {
+    "confirmation_expired": "Подтверждение истекло — попросите операцию заново, я подготовлю новую карточку.",
+    "card_not_prepared": "Карточка не найдена — попросите операцию заново.",
+    "session_limit": "Лимит исчерпан: в одной сессии можно сменить тариф не больше двух раз. Могу позвать оператора.",
+    "pdp_unavailable": "Действия сейчас недоступны: не работает проверка прав. "
+                       "На вопросы отвечу, могу позвать оператора.",
+}
 
 
 def _sources(runs: list[dict]) -> list[str]:
@@ -111,7 +120,15 @@ def reject(session, card) -> None:
 
 
 async def execute_pending(session, card) -> str:
-    """«Да» → исполнение под ключом идемпотентности → ответ человеку."""
+    """«Да» → ConfirmCard → Execute → исполнение под ключом идемпотентности."""
+    pep = pep_of(session)
+    for stage, ask in (("ConfirmCard", pep.confirm), ("Execute", pep.execute)):
+        decision = await ask(card)
+        if not decision.allowed:
+            expired = decision.reason in ("confirmation_expired", "card_not_prepared")
+            cards.settle(session, card, "expired" if expired else "denied")
+            _audit(session, card, "denied", args=card.details, detail=f"pdp {stage} {decision.reason}")
+            return DENIED.get(decision.reason, f"Действие не прошло проверку прав: {decision.reason}.")
     cards.settle(session, card, "confirmed")
     key = f"{card.action}:{card.pending_id}"
     stored = await idempotency.execute(
